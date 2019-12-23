@@ -1,0 +1,5 @@
+
+*env
+not-shady-utils
+.envrc
+auth-key-file.json
