@@ -8,6 +8,13 @@ from async_utils import handle_requests
 
 
 
+# TODO: Handle more use cases
+# TODO: Handle YOUTUBE uploads
+# TODO: Allow title, description and other features to be input
+# TODO: Make interceding clips of something..
+# TODO: Progress updates & live logging 
+
+
 CRAIG_THE_POET_BUCKET = 'craig-the-poet'
 POEM_DIR = 'poems'
 AD_DIR = 'craigslist'
@@ -123,7 +130,7 @@ def poem_stitcher(source_ad_bucket_dir, source_poem_bucket_dir, dont_post_if_und
 #    print('Min poem runtime met')
 
     if all_of_day:
-        if total_runtime < dont_post_if_under:
+        if dont_post_if_under and total_runtime < dont_post_if_under:
             print('Minimum runtime length not met. Exiting...')
             exit()
 

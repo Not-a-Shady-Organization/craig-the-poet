@@ -3,3 +3,5 @@
 not-shady-utils
 .envrc
 auth-key-file.json
+poems
+__pycache__
