@@ -1,10 +1,12 @@
 import argparse
 from datetime import datetime
-from utils import BadOptionsError, makedir, convert_to_date, LogDecorator, craigslist_format_to_date, craigslist_format_to_datetime
+from utils import BadOptionsError, makedir, convert_to_date, LogDecorator
+from upload_video import upload_youtube_video
 
-from google_utils import get_blob
+from google_utils import get_blob, upload_file_to_bucket
 from ffmpeg_utils import concat_videos
 import os
+from subprocess import check_output
 from async_utils import handle_requests
 
 
@@ -49,19 +51,15 @@ from async_utils import handle_requests
 #
 
 
-CRAIG_THE_POET_BUCKET = 'craig-the-poet'
-POEM_DIR = 'poems'
-AD_DIR = 'craigslist'
-
 FFMPEG_CONFIG = {'loglevel': 'panic', 'safe': 0, 'hide_banner': None, 'y': None}
 
 CRAIGSLIST_SCRAPER_ENDPOINT = os.environ['CRAIGSLIST_SCRAPER_ENDPOINT']
 POEM_MAKER_ENDPOINT = os.environ['POEM_MAKER_ENDPOINT']
 
 
-def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None, max_length=None, date=None, all_of_day=False, **kwargs):
+def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_length=None, max_length=None, date=None, image_flavor=None, all_of_day=False, no_youtube_upload=False, voice=None, speaking_rate=None, pitch=None, upload_to_bucket_path=None):
     # Toss invalid combinations of args
-    if args.all_of_day and (not args.date or not args.cities):
+    if all_of_day and (not date or not cities):
         raise BadOptionsError('Must specify DATE and CITIES when using ALL_OF_DAY flag')
 
     # Ensure correct typing
@@ -69,7 +67,7 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
     date = convert_to_date(date) if type(date) == str else date if type(date) != None else None
 
     # TODO Hash args to create the dir
-    destination_bucket_dir = 'd'
+    destination_bucket_dir = f'{cities[0].replace(" ", "").lower()}-{str(date.date())}'
 
     ##############
     # SCRAPE ADS #
@@ -87,7 +85,7 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
                 'url': CRAIGSLIST_SCRAPER_ENDPOINT,
                 'json': {
                     'destination_bucket_dir': destination_bucket_dir,
-                    'city': city,
+                    'city': city.replace(' ', '').lower(),
                     'date': f'{date.month}-{date.day}-{date.year}',
                     # TODO: Attach min word count and such here
                 }
@@ -116,7 +114,11 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
                 'url': POEM_MAKER_ENDPOINT,
                 'json': {
                     'bucket_path': ad_bucket_path,
-                    'destination_bucket_dir': destination_bucket_dir
+                    'destination_bucket_dir': destination_bucket_dir,
+                    'image_flavor': image_flavor,
+                    'voice': voice,
+                    'pitch': pitch,
+                    'speaking_rate': speaking_rate
                 }
             })
     else:
@@ -126,12 +128,21 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
     responses = handle_requests(maker_request_list)
 
     # Capture all videos bucket paths
-    poem_bucket_paths = []
+    video_bucket_paths = []
     for response in responses:
-        video_bucket_paths += eval(response.decode('utf-8'))
+        video_bucket_path = response.decode('utf-8')
+
+        # Check if we errored and couldn't finish the video
+        if video_bucket_path == '' or 'Exception' in video_bucket_path:
+            continue
+
+        video_bucket_paths += [video_bucket_path]
+
+    print(video_bucket_paths)
 
     # Grab the blobs
-    video_blobs = [get_blob(bucket_path) for bucket_path in video_bucket_paths]
+    video_blobs = [get_blob('craig-the-poet', bucket_path) for bucket_path in video_bucket_paths]
+
 
     #########
     # ORDER #
@@ -140,13 +151,14 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
     # Order the blobs by time of post
     def to_datetime(b):
         # e.g. 2019-12-25T21:27:07-0600
-        datetime_string = b.metadata['ad-posted-time'].split('')
+        datetime_string = b.metadata['ad-posted-time']
         date_string, time_string = datetime_string.split('T')
         year, month, day = date_string.split('-')
         hour, minute, second = time_string.split('-')[0].split(':')
         return datetime.strptime(f'{year}-{month}-{day}-{hour}-{minute}-{second}', "%Y-%m-%d-%H-%M-%S")
 
     video_blobs = sorted(video_blobs, key=to_datetime)
+
 
     ############
     # VALIDATE #
@@ -176,15 +188,67 @@ def poem_stitcher(cities=None, dont_post_if_runtime_under=None, min_length=None,
 
     print('Concatenation complete')
 
+    if upload_to_bucket_path:
+        upload_file_to_bucket('craig-the-poet', 'out.mp4', upload_to_bucket_path)
+
+#    if no_upload:
+#        return './out.mp4'
+
+
     #####################
     # UPLOAD TO YOUTUBE #
     #####################
 
-    # TODO: In upload process, allow kwargs to set all YT stuff
+    # Get information for description
+    video_info_list = []
+    current_runtime = 0.
+    for i, blob in enumerate(video_blobs):
+        runtime = float(blob.metadata['runtime'])
+        video_info_list.append({
+            'title': blob.metadata['ad-title'],
+            'start-time': current_runtime
+        })
+        current_runtime += runtime
 
-#    for blob in selected_poem_blobs:
-#        blob.metadata = {'used': 'true'}
-#        blob.patch()
+    title = f'Missed Connections {cities[0]} {date.month}-{date.day}-{date.year}'
+
+    def float_to_youtube_time(s):
+        minutes = str(int(s) // 60)
+        seconds = str(int(s) % 60)
+        return f'{minutes}:{"0" + seconds if len(seconds) != 2 else seconds}'
+
+    description = f'My name is Craigothy, and I am a poet. These works are all inspired by true events.\n'
+    for info in video_info_list:
+        description += f'\n{float_to_youtube_time(info["start-time"])} -- {info["title"]}'
+    description += '\n\nAll rights reserved for pleasure.'
+
+    keywords = f'love,craigslist,poetry,humanity,craig'
+
+    args = {
+        # Default args for google-api-client namespace objects
+        'auth_host_name': 'localhost',
+        'auth_host_port': [8080, 8090],
+        'category': '22',
+        'logging_level': 'ERROR',
+        'noauth_local_webserver': False,
+        'privacyStatus': 'public',
+
+        'file': 'out.mp4',
+        'title': title,
+        'description': description,
+        'keywords': keywords
+    }
+
+
+    print(args)
+    if no_youtube_upload:
+        return './out.mp4'
+
+
+    print('Uploading to YouTube...')
+    upload_youtube_video(args)
+
+
 
     pass
 
@@ -212,8 +276,13 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--cities', nargs='+')
-
     parser.add_argument('--all-of-day', action='store_true')
+
+    parser.add_argument('--no-youtube-upload', action='store_true')
+    parser.add_argument('--upload-to-bucket-path')
+
+    parser.add_argument('--urls', nargs='+')
+
 
     # AD FILTERS
     parser.add_argument('--date', help='Filter to only posts from this date. Format: mm-dd-yyyy', type=convert_to_date)
@@ -221,7 +290,11 @@ if __name__ == '__main__':
     # POEM FILTERS
     parser.add_argument('--dont-post-if-runtime-under', type=float)
 
+    parser.add_argument('--voice')
+    parser.add_argument('--speaking-rate', type=float)
+    parser.add_argument('--pitch', type=float)
 
+    parser.add_argument('--image-flavor', nargs='+')
 
     # Min/Max output video length -- time in seconds
     parser.add_argument('--min-length', type=float)

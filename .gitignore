@@ -2,6 +2,15 @@
 *env
 not-shady-utils
 .envrc
-auth-key-file.json
 poems
 __pycache__
+
+auth-key-file.json
+
+# Not sure we need this
+client_secrets.json
+
+# This or a different one?
+craig_the_poet.py-oauth2.json
+
+.DS_Store
