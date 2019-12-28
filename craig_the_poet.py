@@ -41,6 +41,8 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
     # TODO Hash args to create the dir
     destination_bucket_dir = f'{cities[0].replace(" ", "").lower()}-{str(date.date())}'
 
+    print(cities, date)
+
 
     ##############
     # SCRAPE ADS #
@@ -64,8 +66,12 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
                 }
             })
 
+    print(scraper_request_list)
+
     # Send requests from list concurrently
     responses = handle_requests(scraper_request_list)
+
+    print(responses)
 
     # Capture all scraped ad bucket paths
     ad_bucket_paths = []
@@ -76,6 +82,9 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
         except:
             print(response)
             pass
+
+    if ad_bucket_paths == []:
+        raise ValueError('No ads collected')
 
 
     ##################
@@ -119,6 +128,9 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
             pass
 
     print(video_bucket_paths)
+
+    if video_bucket_paths == []:
+        raise ValueError('No poems successfully made')
 
     # Grab the blobs
     video_blobs = [get_blob('craig-the-poet', bucket_path) for bucket_path in video_bucket_paths]
