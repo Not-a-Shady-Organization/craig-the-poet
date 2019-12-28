@@ -16,7 +16,8 @@ def kickoff_poem_stitcher():
         return str(poem_stitcher(**data))
     except Exception as e:
         tb = traceback.format_exc()
-        return f'Exception occurred: {e}\n{tb}'
+        #return f'Exception occurred: {e}\n{tb}'
+        raise e
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
