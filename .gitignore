@@ -5,12 +5,10 @@ not-shady-utils
 poems
 __pycache__
 
+# Credentials
 auth-key-file.json
-
-# Not sure we need this
 client_secrets.json
-
-# This or a different one?
-craig_the_poet.py-oauth2.json
+youtube-oauth2.json
+# Note: The youtube-oauth2.json.example must stay
 
 .DS_Store
