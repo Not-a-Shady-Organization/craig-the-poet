@@ -10,45 +10,17 @@ from subprocess import check_output
 from async_utils import handle_requests
 
 
-
-# New Alg --
-# Stitch request comes in...
-# Scrape:
-#   Scrape in accordance to request -- city/cities, word count, date, urls?
-#   Store scraped ads in bucket dir hashed by request name
-#   Return paths to ads and other info to stitcher
-# Poem:
-#   Take all ads and create poems
-#   Store poems in temp bucket for request as well
-#   Return paths to all videos
-# Stitch:
-#   Validate
-#   Stitch
-#   Upload
-
-
-# Q: Maybe ad scraping should be done per stitch request
-
+# TODO: Get count workings
+# TODO: Get logging working with GCP
+# TODO: Figure out "Rate exceeded." message
+# TODO: Figure out timeout error handling
+# TODO: Stats on conainer counts at any time
+# TODO: Stats on longest jobs
 # TODO: Handle more use cases
 # TODO: Handle YOUTUBE uploads
-# TODO: Allow title, description and other features to be input
 # TODO: Make interceding clips of something..
 # TODO: Progress updates & live logging
-# TODO: Search words & prefixes
-# TODO: Make poem-maker return JSON of generated video paths
-# TODO: Make craigslist-scraper return JSON array of bucket paths
 # TODO: Allow min video length & min word count for all-of-day videos
-# TODO: Make voice options passable
-
-# CASES:
-# Request all-of-day video for DATE:
-#   Scrape all of DATE
-#   Send all ads from DATE to poem-maker
-#   Concat all poems order by datetime
-#
-# Creepy flag for any video adds voice options & prefixes (change font?)
-#
-#
 
 
 FFMPEG_CONFIG = {'loglevel': 'panic', 'safe': 0, 'hide_banner': None, 'y': None}
@@ -68,6 +40,7 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
 
     # TODO Hash args to create the dir
     destination_bucket_dir = f'{cities[0].replace(" ", "").lower()}-{str(date.date())}'
+
 
     ##############
     # SCRAPE ADS #
@@ -97,7 +70,12 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
     # Capture all scraped ad bucket paths
     ad_bucket_paths = []
     for response in responses:
-        ad_bucket_paths += eval(response.decode('utf-8'))
+        # Filter out TimeoutError that we can catch from workers who responded too slowly
+        try:
+            ad_bucket_paths += eval(response.decode('utf-8'))
+        except:
+            print(response)
+            pass
 
 
     ##################
@@ -126,17 +104,19 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
         exit()
 
     responses = handle_requests(maker_request_list)
+    print(responses)
 
     # Capture all videos bucket paths
     video_bucket_paths = []
     for response in responses:
-        video_bucket_path = response.decode('utf-8')
-
-        # Check if we errored and couldn't finish the video
-        if video_bucket_path == '' or 'Exception' in video_bucket_path:
-            continue
-
-        video_bucket_paths += [video_bucket_path]
+        # Filter out TimeoutError that we can catch from workers who responded too slowly
+        try:
+            response_string = response.decode('utf-8')
+            if not response_string == '' and 'Exception' not in response_string and 'Rate' not in response_string:
+                video_bucket_paths.append(response_string)
+        except:
+            print(response)
+            pass
 
     print(video_bucket_paths)
 
@@ -230,7 +210,7 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
         'auth_host_port': [8080, 8090],
         'category': '22',
         'logging_level': 'ERROR',
-        'noauth_local_webserver': False,
+        'noauth_local_webserver': True, # Default was False
         'privacyStatus': 'public',
 
         'file': 'out.mp4',
@@ -248,9 +228,7 @@ def poem_stitcher(cities=None, urls=None, dont_post_if_runtime_under=None, min_l
     print('Uploading to YouTube...')
     upload_youtube_video(args)
 
-
-
-    pass
+    return 'Success'
 
 
 
