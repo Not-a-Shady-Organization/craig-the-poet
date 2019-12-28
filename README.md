@@ -13,3 +13,8 @@ python craig_the_poet.py \
 --date=12-14-2019 \
 --all-of-day
 ```
+
+
+```bash
+gcloud app deploy
+```
